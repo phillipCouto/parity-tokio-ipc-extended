@@ -18,6 +18,10 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use tokio::net::windows::named_pipe;
+#[cfg(feature = "tonic")]
+use tokio::net::windows::named_pipe::{PipeEnd, PipeInfo, PipeMode};
+#[cfg(feature = "tonic")]
+use tonic::transport::server::Connected;
 
 enum NamedPipe {
     Server(named_pipe::NamedPipeServer),
@@ -34,15 +38,12 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Stream of incoming connections
-    pub fn incoming(
-        mut self,
-    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite>> + 'static> {
+    fn _incoming(mut self) -> io::Result<impl Stream<Item = io::Result<Connection>> + 'static> {
         let pipe = self.create_listener()?;
 
         let stream =
             futures::stream::try_unfold((pipe, self), |(listener, mut endpoint)| async move {
-                let () = listener.connect().await?;
+                listener.connect().await?;
 
                 let new_listener = endpoint.create_listener()?;
 
@@ -52,6 +53,22 @@ impl Endpoint {
             });
 
         Ok(stream)
+    }
+    #[cfg(not(feature = "tonic"))]
+    /// Stream of incoming connections
+    pub fn incoming(
+        self,
+    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite>> + 'static> {
+        self._incoming()
+    }
+
+    #[cfg(feature = "tonic")]
+    /// Stream of incoming connections
+    pub fn incoming(
+        self,
+    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite + Connected>> + 'static>
+    {
+        self._incoming()
     }
 
     fn create_listener(&mut self) -> io::Result<named_pipe::NamedPipeServer> {
@@ -174,6 +191,52 @@ impl AsyncWrite for Connection {
         match this.inner {
             NamedPipe::Client(ref mut c) => Pin::new(c).poll_shutdown(ctx),
             NamedPipe::Server(ref mut s) => Pin::new(s).poll_shutdown(ctx),
+        }
+    }
+}
+
+#[cfg(feature = "tonic")]
+#[derive(Clone)]
+pub struct NamedPipeInfo {
+    pub mode: PipeMode,
+    pub end: PipeEnd,
+    pub max_instances: u32,
+    pub out_buffer_size: u32,
+    pub in_buffer_size: u32,
+}
+#[cfg(feature = "tonic")]
+impl From<PipeInfo> for NamedPipeInfo {
+    fn from(i: PipeInfo) -> Self {
+        Self {
+            mode: i.mode,
+            end: i.end,
+            max_instances: i.max_instances,
+            out_buffer_size: i.out_buffer_size,
+            in_buffer_size: i.in_buffer_size,
+        }
+    }
+}
+
+#[cfg(feature = "tonic")]
+#[derive(Clone)]
+pub struct NamedPipeConnectionInfo {
+    pub info: Option<NamedPipeInfo>,
+}
+
+#[cfg(feature = "tonic")]
+impl Connected for Connection {
+    type ConnectInfo = NamedPipeConnectionInfo;
+
+    fn connect_info(&self) -> Self::ConnectInfo {
+        let info = match &self.inner {
+            NamedPipe::Server(p) => p.info(),
+            NamedPipe::Client(p) => p.info(),
+        };
+        match info {
+            Ok(info) => Self::ConnectInfo {
+                info: Some(NamedPipeInfo::from(info)),
+            },
+            Err(_) => Self::ConnectInfo { info: None },
         }
     }
 }
