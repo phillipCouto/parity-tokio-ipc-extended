@@ -7,6 +7,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{UnixListener, UnixStream};
+#[cfg(feature = "tonic")]
+use tonic::transport::server::Connected;
 
 /// Socket permissions and ownership on UNIX
 pub struct SecurityAttributes {
@@ -46,7 +48,7 @@ impl SecurityAttributes {
     fn apply_permissions(&self, path: &str) -> io::Result<()> {
         if let Some(mode) = self.mode {
             let path = CString::new(path)?;
-            if unsafe { chmod(path.as_ptr(), mode.into()) } == -1 {
+            if unsafe { chmod(path.as_ptr(), mode) } == -1 {
                 return Err(Error::last_os_error());
             }
         }
@@ -62,11 +64,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    /// Stream of incoming connections
-    pub fn incoming(
-        self,
-    ) -> io::Result<impl Stream<Item = std::io::Result<impl AsyncRead + AsyncWrite>> + 'static>
-    {
+    fn _incoming(self) -> io::Result<impl Stream<Item = io::Result<UnixStream>> + 'static> {
         let listener = self.inner()?;
         // the call to bind in `inner()` creates the file
         // `apply_permission()` will set the file permissions.
@@ -75,6 +73,22 @@ impl Endpoint {
             path: self.path,
             listener,
         })
+    }
+    #[cfg(not(feature = "tonic"))]
+    /// Stream of incoming connections
+    pub fn incoming(
+        self,
+    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite>> + 'static> {
+        self._incoming()
+    }
+
+    #[cfg(feature = "tonic")]
+    /// Stream of incoming connections
+    pub fn incoming(
+        self,
+    ) -> io::Result<impl Stream<Item = io::Result<impl AsyncRead + AsyncWrite + Connected>> + 'static>
+    {
+        self._incoming()
     }
 
     /// Inner platform-dependant state of the endpoint
@@ -162,17 +176,17 @@ impl AsyncWrite for Connection {
         self: Pin<&mut Self>,
         ctx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<Result<usize, io::Error>> {
+    ) -> Poll<Result<usize, Error>> {
         let this = Pin::into_inner(self);
         Pin::new(&mut this.inner).poll_write(ctx, buf)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let this = Pin::into_inner(self);
         Pin::new(&mut this.inner).poll_flush(ctx)
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let this = Pin::into_inner(self);
         Pin::new(&mut this.inner).poll_shutdown(ctx)
     }
