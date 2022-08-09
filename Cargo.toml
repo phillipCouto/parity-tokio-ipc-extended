@@ -16,7 +16,7 @@ log = "0.4"
 rand = "0.7"
 tokio = { version = "1.7.0", features = ["net", "time"] }
 libc = "0.2.65"
-tonic = { version  = "0.7", optional = true}
+tonic = { version  = "^0.8", optional = true, default-features = false}
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winbase", "winnt", "accctrl", "aclapi", "securitybaseapi", "minwinbase", "winbase"] }
