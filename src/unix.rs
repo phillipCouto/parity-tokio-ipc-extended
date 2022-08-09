@@ -1,5 +1,5 @@
 use futures::Stream;
-use libc::chmod;
+use libc::{chmod, mode_t};
 use std::ffi::CString;
 use std::io::{self, Error};
 use std::path::Path;
@@ -13,7 +13,7 @@ use tonic::transport::server::Connected;
 /// Socket permissions and ownership on UNIX
 pub struct SecurityAttributes {
     // read/write permissions for owner, group and others in unix octal.
-    mode: Option<u16>,
+    mode: Option<mode_t>,
 }
 
 impl SecurityAttributes {
@@ -30,7 +30,7 @@ impl SecurityAttributes {
     }
 
     /// Set a custom permission on the socket
-    pub fn set_mode(mut self, mode: u16) -> io::Result<Self> {
+    pub fn set_mode(mut self, mode: mode_t) -> io::Result<Self> {
         self.mode = Some(mode);
         Ok(self)
     }
